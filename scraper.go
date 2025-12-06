@@ -2,6 +2,7 @@ package scraper
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -50,6 +51,7 @@ type ScraperConfig struct {
 	HorizontalTiles int
 	UpdateInterval  time.Duration
 	FetchDetails    bool // details api is limited
+	TrajectoryTail  int
 }
 
 func DefaultConfig() ScraperConfig {
@@ -60,6 +62,7 @@ func DefaultConfig() ScraperConfig {
 		HorizontalTiles: 4,
 		UpdateInterval:  2 * time.Second,
 		FetchDetails:    false,
+		TrajectoryTail:  20,
 	}
 }
 
@@ -77,7 +80,7 @@ type Scraper struct {
 
 func NewScraper(config ScraperConfig) *Scraper {
 	ctx, cancel := context.WithCancel(context.Background())
-	tracker := NewTracker()
+	tracker := newTracker(config.TrajectoryTail)
 	s := &Scraper{
 		config:         config,
 		tracker:        tracker,
@@ -167,6 +170,8 @@ func (s *Scraper) tileUpdater() {
 			return
 		case <-ticker.C:
 			s.updateTiles()
+			f, _ := json.Marshal(s.Flights())
+			fmt.Println(len(f))
 		}
 	}
 }

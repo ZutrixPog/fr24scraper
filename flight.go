@@ -37,7 +37,7 @@ func (t *Flight) IsValid() bool {
 	return !(t.ID == 0 && t.ICAO24 == "" && t.SquakeCode == "" && t.CallSign == "" && t.Radar == "")
 }
 
-func (t *Flight) SetCoordinate(timeStamp uint64, latitude, longitude float64, altitude int, heading, speed float64) {
+func (t *Flight) SetCoordinate(timeStamp uint64, latitude, longitude float64, altitude int, heading, speed float64, trajLimit int) {
 	point := TrajectoryPointData{
 		TimeStamp: timeStamp,
 		Latitude:  latitude,
@@ -62,6 +62,10 @@ func (t *Flight) SetCoordinate(timeStamp uint64, latitude, longitude float64, al
 	t.Trajectory = append(t.Trajectory, TrajectoryPointData{})
 	copy(t.Trajectory[insertIndex+1:], t.Trajectory[insertIndex:])
 	t.Trajectory[insertIndex] = point
+
+	if len(t.Trajectory) > trajLimit {
+		t.Trajectory = t.Trajectory[1:]
+	}
 }
 
 func (t *Flight) GetTimeStamp() uint64 {

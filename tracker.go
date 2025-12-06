@@ -16,15 +16,17 @@ type FlightObserver interface {
 type Tracker struct {
 	flights   map[uint64]*Flight
 	observers []FlightObserver
+	trajLimit int
 	mutex     sync.RWMutex
 	stopChan  chan struct{}
 	wg        sync.WaitGroup
 }
 
-func NewTracker() *Tracker {
+func newTracker(trajLimit int) *Tracker {
 	tracker := &Tracker{
 		flights:   make(map[uint64]*Flight),
 		observers: make([]FlightObserver, 0),
+		trajLimit: trajLimit,
 		stopChan:  make(chan struct{}),
 	}
 
@@ -137,6 +139,7 @@ func (t *Tracker) updateExistingFlight(existingFlight *Flight, flightData *Recei
 		flightData.Altitude,
 		flightData.Track,
 		float64(flightData.GroundSpeed),
+		t.trajLimit,
 	)
 
 	for _, obs := range t.observers {
@@ -167,6 +170,7 @@ func (t *Tracker) addNewFlight(flightData *ReceivedFlightData) error {
 		flightData.Altitude,
 		flightData.Track,
 		float64(flightData.GroundSpeed),
+		t.trajLimit,
 	)
 	for _, obs := range t.observers {
 		obs.OnFlightAdded(newFlight)
@@ -201,7 +205,7 @@ func (t *Tracker) addFlightDetail(id uint64, detail []map[string]any, countryID 
 		speed := toFloat64(pointDetail["spd"])
 		timestamp := toUint64(pointDetail["ts"])
 
-		flight.SetCoordinate(timestamp, latitude, longitude, altitude, heading, speed)
+		flight.SetCoordinate(timestamp, latitude, longitude, altitude, heading, speed, t.trajLimit)
 	}
 
 	flight.InitialTrajectoryReceived = true
