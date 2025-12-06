@@ -2,7 +2,6 @@ package scraper
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -170,8 +169,6 @@ func (s *Scraper) tileUpdater() {
 			return
 		case <-ticker.C:
 			s.updateTiles()
-			f, _ := json.Marshal(s.Flights())
-			fmt.Println(len(f))
 		}
 	}
 }
