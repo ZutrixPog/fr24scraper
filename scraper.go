@@ -3,7 +3,6 @@ package scraper
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 )
 
@@ -110,8 +109,6 @@ func (s *Scraper) Start() error {
 
 	go s.tileUpdater()
 
-	log.Printf("Scraper started with %d tiles, update interval: %v",
-		len(s.tiles), s.config.UpdateInterval)
 	return nil
 }
 

@@ -105,7 +105,8 @@ func (t *Tracker) addOrUpdateFlight(flightData *ReceivedFlightData) error {
 
 func (t *Tracker) updateExistingFlight(existingFlight *Flight, flightData *ReceivedFlightData) error {
 	if flightData.TimeStamp < existingFlight.GetTimeStamp() {
-		return errors.New("flight data timestamp is not newer than existing flight")
+		return nil
+		// return errors.New("flight data timestamp is not newer than existing flight")
 	}
 
 	infoChanged := flightData.ICAO24 != existingFlight.ICAO24 ||
