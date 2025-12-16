@@ -1,8 +1,11 @@
 package scraper
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 )
 
@@ -35,6 +38,12 @@ type FlightEvent struct {
 
 type EventType int
 
+type TileFetchRecord struct {
+	Tile      Tile
+	Data      *FlightData
+	Timestamp time.Time
+}
+
 const (
 	EventFlightInfo EventType = iota
 	EventTrajectory
@@ -49,6 +58,8 @@ type ScraperConfig struct {
 	HorizontalTiles int
 	UpdateInterval  time.Duration
 	FetchDetails    bool // details api is limited
+	RecordPath      string
+	ReplayPath      string
 	TrajectoryTail  int
 }
 
@@ -72,11 +83,17 @@ type Scraper struct {
 	tiles          []Tile
 	events         chan FlightEvent
 	errors         chan error
+	recordFile     *os.File
+	replayFile     *os.File
 	ctx            context.Context
 	cancel         context.CancelFunc
 }
 
 func NewScraper(config ScraperConfig) *Scraper {
+	if config.RecordPath != "" && config.ReplayPath != "" {
+		panic("recordPath and replayPath are mutually exclusive")
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	tracker := newTracker(config.TrajectoryTail)
 	s := &Scraper{
@@ -103,6 +120,18 @@ func (s *Scraper) Errors() <-chan error {
 }
 
 func (s *Scraper) Start() error {
+	if s.config.ReplayPath != "" {
+		return s.startReplay()
+	}
+
+	if s.config.RecordPath != "" {
+		f, err := os.OpenFile(s.config.RecordPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			return err
+		}
+		s.recordFile = f
+	}
+
 	if err := s.initializeTiles(); err != nil {
 		return fmt.Errorf("failed to initialize tiles: %w", err)
 	}
@@ -115,8 +144,103 @@ func (s *Scraper) Start() error {
 func (s *Scraper) Stop() {
 	s.cancel()
 	s.tracker.Close()
+
+	if s.recordFile != nil {
+		_ = s.recordFile.Close()
+	}
+	if s.replayFile != nil {
+		_ = s.replayFile.Close()
+	}
+
 	close(s.events)
 	close(s.errors)
+}
+
+func (s *Scraper) startReplay() error {
+	f, err := os.Open(s.config.ReplayPath)
+	if err != nil {
+		return err
+	}
+	s.replayFile = f
+
+	go s.replayLoop()
+	return nil
+}
+
+func (s *Scraper) replayLoop() {
+	for {
+		if err := s.replayOnce(); err != nil {
+			select {
+			case s.errors <- err:
+			default:
+			}
+		}
+
+		select {
+		case <-s.ctx.Done():
+			return
+		default:
+		}
+	}
+}
+
+func (s *Scraper) replayOnce() error {
+	_, err := s.replayFile.Seek(0, 0)
+	if err != nil {
+		return err
+	}
+
+	scanner := bufio.NewScanner(s.replayFile)
+	var lastTS time.Time
+
+	for scanner.Scan() {
+		select {
+		case <-s.ctx.Done():
+			return nil
+		default:
+		}
+
+		var rec TileFetchRecord
+		if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
+			return err
+		}
+
+		if !lastTS.IsZero() {
+			time.Sleep(rec.Timestamp.Sub(lastTS))
+		}
+		lastTS = rec.Timestamp
+
+		s.applyTileData(&rec.Tile, rec.Data)
+	}
+
+	s.flushAllFlights()
+	return scanner.Err()
+}
+
+func (s *Scraper) flushAllFlights() {
+	flights := s.tracker.getFlightList()
+	if len(flights) == 0 {
+		return
+	}
+
+	ids := make([]uint64, 0, len(flights))
+	for _, f := range flights {
+		ids = append(ids, f.ID)
+	}
+
+	s.tracker = newTracker(s.config.TrajectoryTail)
+
+	for _, id := range ids {
+		select {
+		case s.events <- FlightEvent{
+			Type:      EventFlightRemoved,
+			FlightID:  id,
+			Data:      nil,
+			Timestamp: time.Now(),
+		}:
+		default:
+		}
+	}
 }
 
 func (s *Scraper) initializeTiles() error {
@@ -153,6 +277,13 @@ func (s *Scraper) initializeTiles() error {
 	}
 
 	return nil
+}
+
+func (s *Scraper) emitEvent(ev FlightEvent) {
+	select {
+	case s.events <- ev:
+	default:
+	}
 }
 
 func (s *Scraper) tileUpdater() {
@@ -202,6 +333,18 @@ func (s *Scraper) processTile(tile *Tile) {
 		return
 	}
 
+	if s.recordFile != nil {
+		_ = json.NewEncoder(s.recordFile).Encode(TileFetchRecord{
+			Tile:      *tile,
+			Data:      flightData,
+			Timestamp: time.Now(),
+		})
+	}
+
+	s.applyTileData(tile, flightData)
+}
+
+func (s *Scraper) applyTileData(tile *Tile, flightData *FlightData) {
 	tile.LastUpdateTime = time.Now().UnixMilli()
 	tile.NumSuccessFetches++
 
@@ -291,30 +434,22 @@ func (s *Scraper) Flight(id uint64) (*Flight, error) {
 }
 
 func (s *Scraper) OnFlightAdded(t *Flight) {
-	select {
-	case s.events <- FlightEvent{
+	s.emitEvent(FlightEvent{
 		Type:      EventFlightAdded,
 		FlightID:  t.ID,
 		Data:      t,
 		Timestamp: time.Now(),
-	}:
-	default:
-		return
-	}
+	})
 }
 
 func (s *Scraper) OnFlightRemoved(removed []uint64) {
 	for _, id := range removed {
-		select {
-		case s.events <- FlightEvent{
+		s.emitEvent(FlightEvent{
 			Type:      EventFlightRemoved,
 			FlightID:  id,
 			Data:      nil,
 			Timestamp: time.Now(),
-		}:
-		default:
-			return
-		}
+		})
 	}
 }
 
@@ -323,16 +458,12 @@ func (s *Scraper) OnFlightUpdated(t *Flight) {
 	newPoints := t.TrajectoryPoints(lastPoints)
 
 	if len(newPoints) > 0 {
-		select {
-		case s.events <- FlightEvent{
+		s.emitEvent(FlightEvent{
 			Type:      EventTrajectory,
 			FlightID:  t.ID,
 			Data:      newPoints,
 			Timestamp: time.Now(),
-		}:
-		default:
-			return
-		}
+		})
 		s.updateLastTrajPoints(t.ID, newPoints)
 	}
 }

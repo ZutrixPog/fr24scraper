@@ -2,6 +2,7 @@ package scraper
 
 import (
 	"encoding/json"
+	"maps"
 	"time"
 )
 
@@ -147,6 +148,17 @@ func (fd *FlightData) UnmarshalJSON(data []byte) error {
 	}
 
 	return nil
+}
+
+func (fd *FlightData) MarshalJSON() ([]byte, error) {
+	out := make(map[string]any, len(fd.Flights)+2)
+
+	out["full_count"] = fd.FullCount
+	out["version"] = fd.Version
+
+	maps.Copy(out, fd.Flights)
+
+	return json.Marshal(out)
 }
 
 func (fd *FlightData) GetFlightArray(flightID string) ([]any, error) {
