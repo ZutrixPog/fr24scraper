@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"time"
 )
@@ -84,7 +85,6 @@ type Scraper struct {
 	events         chan FlightEvent
 	errors         chan error
 	recordFile     *os.File
-	replayFile     *os.File
 	ctx            context.Context
 	cancel         context.CancelFunc
 }
@@ -148,21 +148,12 @@ func (s *Scraper) Stop() {
 	if s.recordFile != nil {
 		_ = s.recordFile.Close()
 	}
-	if s.replayFile != nil {
-		_ = s.replayFile.Close()
-	}
 
 	close(s.events)
 	close(s.errors)
 }
 
 func (s *Scraper) startReplay() error {
-	f, err := os.Open(s.config.ReplayPath)
-	if err != nil {
-		return err
-	}
-	s.replayFile = f
-
 	go s.replayLoop()
 	return nil
 }
@@ -172,6 +163,7 @@ func (s *Scraper) replayLoop() {
 		if err := s.replayOnce(); err != nil {
 			select {
 			case s.errors <- err:
+				log.Fatal(err.Error())
 			default:
 			}
 		}
@@ -185,12 +177,13 @@ func (s *Scraper) replayLoop() {
 }
 
 func (s *Scraper) replayOnce() error {
-	_, err := s.replayFile.Seek(0, 0)
+	f, err := os.Open(s.config.ReplayPath)
 	if err != nil {
 		return err
 	}
+	defer f.Close()
 
-	scanner := bufio.NewScanner(s.replayFile)
+	scanner := bufio.NewScanner(f)
 	var lastTS time.Time
 
 	for scanner.Scan() {
@@ -228,7 +221,9 @@ func (s *Scraper) flushAllFlights() {
 		ids = append(ids, f.ID)
 	}
 
-	s.tracker = newTracker(s.config.TrajectoryTail)
+	s.tracker.Reset()
+	s.lastTrajPoints = make(map[uint64][]int64)
+	s.lastInfoSeq = make(map[uint64]uint32)
 
 	for _, id := range ids {
 		select {

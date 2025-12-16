@@ -36,6 +36,10 @@ func newTracker(trajLimit int) *Tracker {
 	return tracker
 }
 
+func (t *Tracker) Reset() {
+	t.flights = make(map[uint64]*Flight)
+}
+
 func (t *Tracker) Close() {
 	close(t.stopChan)
 	t.wg.Wait()
