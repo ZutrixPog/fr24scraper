@@ -70,7 +70,7 @@ func (t *Tracker) removeStaleFlights() {
 	defer t.mutex.Unlock()
 
 	currentTime := time.Now().Unix()
-	cutoffTime := currentTime - 600
+	cutoffTime := currentTime - 60
 
 	var removedFlights []uint64
 

@@ -63,6 +63,7 @@ func (t *Flight) SetCoordinate(timeStamp uint64, latitude, longitude float64, al
 	t.Trajectory = append(t.Trajectory, TrajectoryPointData{})
 	copy(t.Trajectory[insertIndex+1:], t.Trajectory[insertIndex:])
 	t.Trajectory[insertIndex] = point
+	t.LastUpdateTime = time.Now().Unix()
 
 	if len(t.Trajectory) > trajLimit {
 		t.Trajectory = t.Trajectory[1:]
