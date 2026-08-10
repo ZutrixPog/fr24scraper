@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -54,25 +56,27 @@ const (
 )
 
 type ScraperConfig struct {
-	Bounds          [4]float64
-	VerticalTiles   int
-	HorizontalTiles int
-	UpdateInterval  time.Duration
-	FetchDetails    bool // details api is limited
-	RecordPath      string
-	ReplayPath      string
-	TrajectoryTail  int
+	Bounds                [4]float64
+	VerticalTiles         int
+	HorizontalTiles       int
+	UpdateInterval        time.Duration
+	FetchDetails          bool          // details api is limited
+	DetailsUpdateInterval time.Duration // start a details round at most once per interval
+	RecordPath            string
+	ReplayPath            string
+	TrajectoryTail        int
 }
 
 func DefaultConfig() ScraperConfig {
 	return ScraperConfig{
 		// Bounds:          [4]float64{43, 38, 22, 70}, // Iran by default
-		Bounds:          [4]float64{40.277757, 43.480446, 24.954477, 63.746484},
-		VerticalTiles:   4,
-		HorizontalTiles: 4,
-		UpdateInterval:  2 * time.Second,
-		FetchDetails:    false,
-		TrajectoryTail:  20,
+		Bounds:                [4]float64{40.277757, 43.480446, 24.954477, 63.746484},
+		VerticalTiles:         4,
+		HorizontalTiles:       4,
+		UpdateInterval:        2 * time.Second,
+		FetchDetails:          false,
+		DetailsUpdateInterval: 30 * time.Second,
+		TrajectoryTail:        20,
 	}
 }
 
@@ -87,7 +91,15 @@ type Scraper struct {
 	recordFile     *os.File
 	ctx            context.Context
 	cancel         context.CancelFunc
+
+	detailsQueue    chan uint64
+	detailsWg       sync.WaitGroup
+	lastDetailFetch atomic.Int64
+	detailsActive   atomic.Bool
+	detailsPending  atomic.Int64
 }
+
+const detailsRequestDelay = 100 * time.Millisecond
 
 func NewScraper(config ScraperConfig) *Scraper {
 	if config.RecordPath != "" && config.ReplayPath != "" {
@@ -103,6 +115,7 @@ func NewScraper(config ScraperConfig) *Scraper {
 		errors:         make(chan error, 10),
 		lastInfoSeq:    make(map[uint64]uint32),
 		lastTrajPoints: make(map[uint64][]int64),
+		detailsQueue:   make(chan uint64, 4096),
 		ctx:            ctx,
 		cancel:         cancel,
 	}
@@ -120,6 +133,11 @@ func (s *Scraper) Errors() <-chan error {
 }
 
 func (s *Scraper) Start() error {
+	if s.config.FetchDetails {
+		s.detailsWg.Add(1)
+		go s.detailsWorker()
+	}
+
 	if s.config.ReplayPath != "" {
 		return s.startReplay()
 	}
@@ -143,6 +161,7 @@ func (s *Scraper) Start() error {
 
 func (s *Scraper) Stop() {
 	s.cancel()
+	s.detailsWg.Wait()
 	s.tracker.Close()
 
 	if s.recordFile != nil {
@@ -358,24 +377,69 @@ func (s *Scraper) applyTileData(tile *Tile, flightData *FlightData) {
 		}
 	}
 
-	if s.config.FetchDetails {
-		s.requestFlightDetails(flightData)
+	if s.config.FetchDetails && s.shouldFetchDetails() {
+		s.queueDetailsRound()
 	}
 }
 
-func (s *Scraper) requestFlightDetails(flightData *FlightData) {
-	for flightID := range flightData.Flights {
-		if flightID == "stats" {
-			continue
-		}
+func (s *Scraper) shouldFetchDetails() bool {
+	if !s.detailsActive.CompareAndSwap(false, true) {
+		return false
+	}
 
-		id, err := hexStringToUint64(flightID)
-		if err != nil {
-			continue
+	if interval := s.config.DetailsUpdateInterval; interval > 0 {
+		window := max(int64(interval/time.Second), 1)
+		now := time.Now().Unix()
+		last := s.lastDetailFetch.Load()
+		if now-last < window {
+			s.detailsActive.Store(false)
+			return false
 		}
+		s.lastDetailFetch.Store(now)
+	}
 
-		if _, err := s.tracker.getFlight(id); err == nil {
-			go s.fetchFlightDetails(id)
+	return true
+}
+
+func (s *Scraper) queueDetailsRound() {
+	ids := s.tracker.getFlightKeys()
+	if len(ids) == 0 {
+		s.detailsActive.Store(false)
+		return
+	}
+
+	s.detailsPending.Store(int64(len(ids)))
+	for _, id := range ids {
+		select {
+		case s.detailsQueue <- id:
+		default:
+			s.detailsPending.Add(-1)
+		}
+	}
+
+	if s.detailsPending.Load() == 0 {
+		s.detailsActive.Store(false)
+	}
+}
+
+func (s *Scraper) detailsWorker() {
+	defer s.detailsWg.Done()
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case id := <-s.detailsQueue:
+			s.fetchFlightDetails(id)
+			if s.detailsPending.Add(-1) <= 0 {
+				s.detailsActive.Store(false)
+			}
+
+			select {
+			case <-time.After(detailsRequestDelay):
+			case <-s.ctx.Done():
+				return
+			}
 		}
 	}
 }

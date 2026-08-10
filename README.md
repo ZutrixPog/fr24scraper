@@ -68,8 +68,9 @@ config := scraper.ScraperConfig{
     Bounds:          [4]float64{40.27, 43.48, 24.95, 63.74}, // [topLeftLat, topLeftLon, bottomRightLat, bottomRightLon]
     VerticalTiles:   4,    // Number of vertical divisions
     HorizontalTiles: 4,    // Number of horizontal divisions
-    UpdateInterval:  2 * time.Second, // How often to refresh data
-    FetchDetails:    false, // Enable detailed flight information (rate limited)
+    UpdateInterval:    2 * time.Second, // How often to refresh data
+    FetchDetails:      false, // Enable detailed flight information (rate limited)
+    DetailsUpdateInterval: 30 * time.Second, // Start a details round at most once per interval
 }
 
 scraper := scraper.NewScraper(config)

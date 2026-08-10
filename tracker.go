@@ -70,21 +70,22 @@ func (t *Tracker) removeStaleFlights() {
 	defer t.mutex.Unlock()
 
 	currentTime := time.Now().Unix()
-	cutoffTime := currentTime - 60
+	cutoffTime := currentTime - 60*60*2
+	suspendTime := currentTime - 60
 
-	var removedFlights []uint64
+	var suspendedFlights []uint64
 
 	for id, flight := range t.flights {
 		if flight.LastUpdateTime < cutoffTime {
-			removedFlights = append(removedFlights, id)
+			delete(t.flights, id)
+		} else if flight.LastUpdateTime < suspendTime {
+			suspendedFlights = append(suspendedFlights, id)
+			t.flights[id].Suspended = true
 		}
 	}
 
-	for _, id := range removedFlights {
-		delete(t.flights, id)
-	}
 	for _, obs := range t.observers {
-		obs.OnFlightRemoved(removedFlights)
+		obs.OnFlightRemoved(suspendedFlights)
 	}
 }
 
@@ -147,6 +148,13 @@ func (t *Tracker) updateExistingFlight(existingFlight *Flight, flightData *Recei
 		t.trajLimit,
 	)
 
+	if existingFlight.Suspended {
+		existingFlight.Suspended = false
+		for _, obs := range t.observers {
+			obs.OnFlightAdded(existingFlight)
+		}
+	}
+
 	for _, obs := range t.observers {
 		obs.OnFlightUpdated(existingFlight)
 	}
@@ -165,6 +173,7 @@ func (t *Tracker) addNewFlight(flightData *ReceivedFlightData) error {
 		AircraftType:         flightData.AircraftType,
 		FlightNumber:         flightData.FlightNumber,
 		AircraftRegistration: flightData.AircraftRegistration,
+		Operator:             flightData.Operator,
 		LastUpdateTime:       time.Now().Unix(),
 	}
 
@@ -198,7 +207,7 @@ func (t *Tracker) addFlightDetail(id uint64, detail []map[string]any, countryID 
 		return fmt.Errorf("flight with ID %d does not exist", id)
 	}
 
-	flight.CountryID = countryID
+	flight.CountryId = countryID
 	flight.InfoUpdateSequence++
 	flight.LastUpdateTime = time.Now().Unix()
 

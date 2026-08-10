@@ -117,7 +117,7 @@ func ConvertFlightArrayToFlightData(flightID string, array []any) (*ReceivedFlig
 		flightData.CallSign = toString(array[16])
 	}
 	if len(array) > 18 {
-		flightData.Country = toString(array[18])
+		flightData.Operator = toString(array[18])
 	}
 
 	return flightData, nil

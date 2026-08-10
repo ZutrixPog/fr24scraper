@@ -27,11 +27,17 @@ type Flight struct {
 	Radar                     string                `json:"radar"`
 	Origin                    string                `json:"origin"`
 	Destination               string                `json:"destination"`
-	CountryID                 int                   `json:"countryId"`
-	ForceSendInfo             bool                  `json:"forceSendInfo"`
-	InitialTrajectoryReceived bool                  `json:"initialTrajectoryReceived"`
+	CountryId                 int                   `json:"countryId"`
+	CountryCode               string                `json:"countryCode"`
+	ForceSendInfo             bool                  `json:"-"`
+	InitialTrajectoryReceived bool                  `json:"-"`
+	Suspended                 bool                  `json:"-"`
 	Trajectory                []TrajectoryPointData `json:"trajectory"`
 	LastUpdateTime            int64                 `json:"lastUpdateTime"`
+	AircraftTypeName          string                `json:"aircraftTypeName"`
+	CountryName               string                `json:"CountryName"`
+	Operator                  string                `json:"operator"`
+	Owner                     string                `json:"owner"`
 }
 
 func (t *Flight) IsValid() bool {
@@ -200,7 +206,7 @@ type ReceivedFlightData struct {
 	Radar                string  `json:"radar"`
 	Origin               string  `json:"origin"`
 	Destination          string  `json:"destination"`
-	Country              string  `json:"country"`
+	Operator             string  `json:"country"`
 }
 
 func (rtd *ReceivedFlightData) IsValid() bool {
