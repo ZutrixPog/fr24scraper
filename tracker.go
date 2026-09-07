@@ -301,6 +301,32 @@ func (t *Tracker) getFlight(id uint64) (*Flight, error) {
 	return flight, nil
 }
 
+func (t *Tracker) getSmoothedFlight(id uint64, radius int) (*Flight, error) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+
+	flight, exists := t.flights[id]
+	if !exists {
+		return nil, fmt.Errorf("flight with ID %d not found", id)
+	}
+	snapshot := *flight
+	snapshot.Trajectory = flight.SmoothedTrajectory(radius)
+	return &snapshot, nil
+}
+
+func (t *Tracker) getSmoothedFlightList(radius int) []*Flight {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+
+	flights := make([]*Flight, 0, len(t.flights))
+	for _, flight := range t.flights {
+		snapshot := *flight
+		snapshot.Trajectory = flight.SmoothedTrajectory(radius)
+		flights = append(flights, &snapshot)
+	}
+	return flights
+}
+
 func (t *Tracker) FlightCount() int {
 	t.mutex.RLock()
 	defer t.mutex.RUnlock()

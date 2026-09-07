@@ -65,6 +65,7 @@ type ScraperConfig struct {
 	RecordPath            string
 	ReplayPath            string
 	TrajectoryTail        int
+	TrajectorySmoothing   int // moving-average radius applied to the trajectory returned by Flight()/Flights(); 0 disables
 }
 
 func DefaultConfig() ScraperConfig {
@@ -77,6 +78,7 @@ func DefaultConfig() ScraperConfig {
 		FetchDetails:          false,
 		DetailsUpdateInterval: 30 * time.Second,
 		TrajectoryTail:        20,
+		TrajectorySmoothing:   1,
 	}
 }
 
@@ -464,7 +466,7 @@ func (s *Scraper) Stats() Stats {
 }
 
 func (s *Scraper) Flights() []*Flight {
-	flights := s.tracker.getFlightList()
+	flights := s.tracker.getSmoothedFlightList(s.config.TrajectorySmoothing)
 	if len(flights) > 0 {
 		return flights
 	}
@@ -478,9 +480,9 @@ func (s *Scraper) Flights() []*Flight {
 	for {
 		select {
 		case <-ctx.Done():
-			return s.tracker.getFlightList()
+			return s.tracker.getSmoothedFlightList(s.config.TrajectorySmoothing)
 		case <-ticker.C:
-			flights = s.tracker.getFlightList()
+			flights = s.tracker.getSmoothedFlightList(s.config.TrajectorySmoothing)
 			if len(flights) > 0 {
 				return flights
 			}
@@ -489,7 +491,7 @@ func (s *Scraper) Flights() []*Flight {
 }
 
 func (s *Scraper) Flight(id uint64) (*Flight, error) {
-	return s.tracker.getFlight(id)
+	return s.tracker.getSmoothedFlight(id, s.config.TrajectorySmoothing)
 }
 
 func (s *Scraper) OnFlightAdded(t *Flight) {
