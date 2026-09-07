@@ -83,3 +83,32 @@ func TestSmoothedTrajectoryIncrementalMatchesFullRebuild(t *testing.T) {
 		}
 	}
 }
+
+func TestSmoothEmitted(t *testing.T) {
+	f := &Flight{}
+	f.Trajectory = []TrajectoryPointData{
+		{TimeStamp: 1, Latitude: 0, Longitude: 0, Altitude: 10, Track: 0, Speed: 100},
+		{TimeStamp: 2, Latitude: 100, Longitude: 100, Altitude: 20, Track: 10, Speed: 200},
+		{TimeStamp: 3, Latitude: 0, Longitude: 0, Altitude: 10, Track: 0, Speed: 100},
+	}
+	raw := append([]TrajectoryPointData(nil), f.Trajectory...)
+
+	got := smoothEmitted(f.Trajectory, []TrajectoryPointData{raw[2]}, 1)
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	want := smoothPoint(f.Trajectory, 2, len(f.Trajectory), 1)
+	if got[0].Latitude != want.Latitude || got[0].Track != want.Track || got[0].Speed != want.Speed {
+		t.Errorf("emitted point = %+v, want %+v", got[0], want)
+	}
+	if got[0].TimeStamp != raw[2].TimeStamp {
+		t.Errorf("timestamp changed")
+	}
+
+	if r := smoothEmitted(f.Trajectory, []TrajectoryPointData{raw[2]}, 0); len(r) != 1 || r[0].Latitude != raw[2].Latitude {
+		t.Errorf("radius 0 should pass through raw")
+	}
+	if r := smoothEmitted(f.Trajectory[:2], []TrajectoryPointData{raw[1]}, 1); len(r) != 1 || r[0].Latitude != raw[1].Latitude {
+		t.Errorf("<3 points should pass through raw")
+	}
+}

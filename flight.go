@@ -152,6 +152,21 @@ func smoothRangeTo(out, raw []TrajectoryPointData, start, end, radius int) {
 	}
 }
 
+func smoothEmitted(raw, points []TrajectoryPointData, radius int) []TrajectoryPointData {
+	if radius <= 0 || len(raw) < 3 {
+		return points
+	}
+	out := make([]TrajectoryPointData, len(points))
+	j := 0
+	for i, p := range raw {
+		if j < len(points) && p.TimeStamp == points[j].TimeStamp {
+			out[j] = smoothPoint(raw, i, len(raw), radius)
+			j++
+		}
+	}
+	return out
+}
+
 func smoothPoint(raw []TrajectoryPointData, i, m, radius int) TrajectoryPointData {
 	span := radius
 	if i-span < 0 {

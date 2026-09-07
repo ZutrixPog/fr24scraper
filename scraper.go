@@ -522,7 +522,7 @@ func (s *Scraper) OnFlightUpdated(t *Flight) {
 		s.emitEvent(FlightEvent{
 			Type:      EventTrajectory,
 			FlightID:  t.ID,
-			Data:      newPoints,
+			Data:      smoothEmitted(t.Trajectory, newPoints, s.config.TrajectorySmoothing),
 			Timestamp: time.Now(),
 		})
 		s.updateLastTrajPoints(t.ID, newPoints)
