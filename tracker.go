@@ -14,20 +14,22 @@ type FlightObserver interface {
 }
 
 type Tracker struct {
-	flights   map[uint64]*Flight
-	observers []FlightObserver
-	trajLimit int
-	mutex     sync.RWMutex
-	stopChan  chan struct{}
-	wg        sync.WaitGroup
+	flights         map[uint64]*Flight
+	observers       []FlightObserver
+	trajLimit       int
+	trajectoryAlpha float64
+	mutex           sync.RWMutex
+	stopChan        chan struct{}
+	wg              sync.WaitGroup
 }
 
-func newTracker(trajLimit int) *Tracker {
+func newTracker(trajLimit int, alpha float64) *Tracker {
 	tracker := &Tracker{
-		flights:   make(map[uint64]*Flight),
-		observers: make([]FlightObserver, 0),
-		trajLimit: trajLimit,
-		stopChan:  make(chan struct{}),
+		flights:         make(map[uint64]*Flight),
+		observers:       make([]FlightObserver, 0),
+		trajLimit:       trajLimit,
+		trajectoryAlpha: alpha,
+		stopChan:        make(chan struct{}),
 	}
 
 	tracker.wg.Add(1)
@@ -175,6 +177,7 @@ func (t *Tracker) addNewFlight(flightData *ReceivedFlightData) error {
 		AircraftRegistration: flightData.AircraftRegistration,
 		Operator:             flightData.Operator,
 		LastUpdateTime:       time.Now().Unix(),
+		TrajectoryAlpha:      t.trajectoryAlpha,
 	}
 
 	newFlight.SetCoordinate(
@@ -299,32 +302,6 @@ func (t *Tracker) getFlight(id uint64) (*Flight, error) {
 		return nil, fmt.Errorf("flight with ID %d not found", id)
 	}
 	return flight, nil
-}
-
-func (t *Tracker) getSmoothedFlight(id uint64, radius int) (*Flight, error) {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-
-	flight, exists := t.flights[id]
-	if !exists {
-		return nil, fmt.Errorf("flight with ID %d not found", id)
-	}
-	snapshot := *flight
-	snapshot.Trajectory = flight.SmoothedTrajectory(radius)
-	return &snapshot, nil
-}
-
-func (t *Tracker) getSmoothedFlightList(radius int) []*Flight {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-
-	flights := make([]*Flight, 0, len(t.flights))
-	for _, flight := range t.flights {
-		snapshot := *flight
-		snapshot.Trajectory = flight.SmoothedTrajectory(radius)
-		flights = append(flights, &snapshot)
-	}
-	return flights
 }
 
 func (t *Tracker) FlightCount() int {

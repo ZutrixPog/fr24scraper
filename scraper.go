@@ -56,29 +56,29 @@ const (
 )
 
 type ScraperConfig struct {
-	Bounds                [4]float64
-	VerticalTiles         int
-	HorizontalTiles       int
-	UpdateInterval        time.Duration
-	FetchDetails          bool          // details api is limited
-	DetailsUpdateInterval time.Duration // start a details round at most once per interval
-	RecordPath            string
-	ReplayPath            string
-	TrajectoryTail        int
-	TrajectorySmoothing   int // moving-average radius applied to the trajectory returned by Flight()/Flights(); 0 disables
+	Bounds                   [4]float64
+	VerticalTiles            int
+	HorizontalTiles          int
+	UpdateInterval           time.Duration
+	FetchDetails             bool          // details api is limited
+	DetailsUpdateInterval    time.Duration // start a details round at most once per interval
+	RecordPath               string
+	ReplayPath               string
+	TrajectoryTail           int
+	TrajectorySmoothingAlpha float64 // EMA smoothing factor applied to trajectories; ~0.15 works well, 0 disables
 }
 
 func DefaultConfig() ScraperConfig {
 	return ScraperConfig{
 		// Bounds:          [4]float64{43, 38, 22, 70}, // Iran by default
-		Bounds:                [4]float64{40.277757, 43.480446, 24.954477, 63.746484},
-		VerticalTiles:         4,
-		HorizontalTiles:       4,
-		UpdateInterval:        2 * time.Second,
-		FetchDetails:          false,
-		DetailsUpdateInterval: 30 * time.Second,
-		TrajectoryTail:        20,
-		TrajectorySmoothing:   1,
+		Bounds:                   [4]float64{40.277757, 43.480446, 24.954477, 63.746484},
+		VerticalTiles:            4,
+		HorizontalTiles:          4,
+		UpdateInterval:           2 * time.Second,
+		FetchDetails:             false,
+		DetailsUpdateInterval:    30 * time.Second,
+		TrajectoryTail:           20,
+		TrajectorySmoothingAlpha: 0.3,
 	}
 }
 
@@ -109,7 +109,7 @@ func NewScraper(config ScraperConfig) *Scraper {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	tracker := newTracker(config.TrajectoryTail)
+	tracker := newTracker(config.TrajectoryTail, config.TrajectorySmoothingAlpha)
 	s := &Scraper{
 		config:         config,
 		tracker:        tracker,
@@ -466,7 +466,7 @@ func (s *Scraper) Stats() Stats {
 }
 
 func (s *Scraper) Flights() []*Flight {
-	flights := s.tracker.getSmoothedFlightList(s.config.TrajectorySmoothing)
+	flights := s.tracker.getFlightList()
 	if len(flights) > 0 {
 		return flights
 	}
@@ -480,9 +480,9 @@ func (s *Scraper) Flights() []*Flight {
 	for {
 		select {
 		case <-ctx.Done():
-			return s.tracker.getSmoothedFlightList(s.config.TrajectorySmoothing)
+			return s.tracker.getFlightList()
 		case <-ticker.C:
-			flights = s.tracker.getSmoothedFlightList(s.config.TrajectorySmoothing)
+			flights = s.tracker.getFlightList()
 			if len(flights) > 0 {
 				return flights
 			}
@@ -491,7 +491,7 @@ func (s *Scraper) Flights() []*Flight {
 }
 
 func (s *Scraper) Flight(id uint64) (*Flight, error) {
-	return s.tracker.getSmoothedFlight(id, s.config.TrajectorySmoothing)
+	return s.tracker.getFlight(id)
 }
 
 func (s *Scraper) OnFlightAdded(t *Flight) {
@@ -522,7 +522,7 @@ func (s *Scraper) OnFlightUpdated(t *Flight) {
 		s.emitEvent(FlightEvent{
 			Type:      EventTrajectory,
 			FlightID:  t.ID,
-			Data:      smoothEmitted(t.Trajectory, newPoints, s.config.TrajectorySmoothing),
+			Data:      newPoints,
 			Timestamp: time.Now(),
 		})
 		s.updateLastTrajPoints(t.ID, newPoints)

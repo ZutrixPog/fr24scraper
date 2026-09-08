@@ -38,9 +38,7 @@ type Flight struct {
 	CountryName               string                `json:"CountryName"`
 	Operator                  string                `json:"operator"`
 	Owner                     string                `json:"owner"`
-	smoothedTrajectory        []TrajectoryPointData `json:"-"`
-	smoothedRadius            int                   `json:"-"`
-	smoothedHeadTS            uint64                `json:"-"`
+	TrajectoryAlpha           float64               `json:"-"`
 }
 
 func (t *Flight) IsValid() bool {
@@ -76,7 +74,52 @@ func (t *Flight) SetCoordinate(timeStamp uint64, latitude, longitude float64, al
 
 	if len(t.Trajectory) > trajLimit {
 		t.Trajectory = t.Trajectory[1:]
+		insertIndex--
 	}
+
+	if insertIndex > 0 && t.TrajectoryAlpha > 0 {
+		t.applyEMA(insertIndex)
+	}
+}
+
+func (t *Flight) applyEMA(i int) {
+	p := &t.Trajectory[i]
+	prev := t.Trajectory[i-1]
+
+	a := clamp(t.TrajectoryAlpha, 0, 1)
+	oneMinus := 1 - a
+
+	p.Latitude = a*p.Latitude + oneMinus*prev.Latitude
+	p.Longitude = a*p.Longitude + oneMinus*prev.Longitude
+	p.Altitude = int(a*float64(p.Altitude) + oneMinus*float64(prev.Altitude))
+	p.Track = wrapBlend(prev.Track, p.Track, a)
+}
+
+func clamp(v, lo, hi float64) float64 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+func wrapBlend(prev, next, a float64) float64 {
+	delta := next - prev
+	if delta > 180 {
+		delta -= 360
+	} else if delta < -180 {
+		delta += 360
+	}
+	r := prev + a*delta
+	if r < 0 {
+		r += 360
+	}
+	if r >= 360 {
+		r -= 360
+	}
+	return r
 }
 
 func (t *Flight) GetTimeStamp() uint64 {
@@ -84,114 +127,6 @@ func (t *Flight) GetTimeStamp() uint64 {
 		return t.Trajectory[len(t.Trajectory)-1].TimeStamp
 	}
 	return 0
-}
-
-func (t *Flight) SmoothedTrajectory(radius int) []TrajectoryPointData {
-	if radius <= 0 || len(t.Trajectory) < 3 {
-		return t.Trajectory
-	}
-
-	raw := t.Trajectory
-	m := len(raw)
-
-	if t.smoothedRadius != radius || len(t.smoothedTrajectory) == 0 {
-		t.smoothedTrajectory = smoothFull(raw, radius)
-		t.smoothedRadius = radius
-		t.smoothedHeadTS = raw[0].TimeStamp
-		return t.smoothedTrajectory
-	}
-
-	shift := 0
-	if raw[0].TimeStamp != t.smoothedHeadTS {
-		for i := 0; i < len(t.smoothedTrajectory); i++ {
-			if raw[0].TimeStamp == t.smoothedTrajectory[i].TimeStamp {
-				shift = i
-				break
-			}
-		}
-		if shift == 0 && raw[0].TimeStamp != t.smoothedTrajectory[0].TimeStamp {
-			t.smoothedTrajectory = smoothFull(raw, radius)
-			t.smoothedRadius = radius
-			t.smoothedHeadTS = raw[0].TimeStamp
-			return t.smoothedTrajectory
-		}
-	}
-
-	old := t.smoothedTrajectory
-	oldLen := len(old)
-
-	out := make([]TrajectoryPointData, m)
-	reuse := min(m, oldLen-shift)
-	for i := 0; i < reuse; i++ {
-		out[i] = old[i+shift]
-	}
-
-	smoothRangeTo(out, raw, 0, min(m-1, shift+radius), radius)
-	smoothRangeTo(out, raw, max(0, oldLen-shift-radius), m-1, radius)
-
-	t.smoothedTrajectory = out
-	t.smoothedHeadTS = raw[0].TimeStamp
-	return out
-}
-
-func smoothFull(raw []TrajectoryPointData, radius int) []TrajectoryPointData {
-	out := make([]TrajectoryPointData, len(raw))
-	for i := range raw {
-		out[i] = smoothPoint(raw, i, len(raw), radius)
-	}
-	return out
-}
-
-func smoothRangeTo(out, raw []TrajectoryPointData, start, end, radius int) {
-	if end < start {
-		return
-	}
-	m := len(raw)
-	for i := start; i <= end; i++ {
-		out[i] = smoothPoint(raw, i, m, radius)
-	}
-}
-
-func smoothEmitted(raw, points []TrajectoryPointData, radius int) []TrajectoryPointData {
-	if radius <= 0 || len(raw) < 3 {
-		return points
-	}
-	out := make([]TrajectoryPointData, len(points))
-	j := 0
-	for i, p := range raw {
-		if j < len(points) && p.TimeStamp == points[j].TimeStamp {
-			out[j] = smoothPoint(raw, i, len(raw), radius)
-			j++
-		}
-	}
-	return out
-}
-
-func smoothPoint(raw []TrajectoryPointData, i, m, radius int) TrajectoryPointData {
-	span := radius
-	if i-span < 0 {
-		span = i
-	}
-	if i+span > m-1 {
-		span = m - 1 - i
-	}
-
-	var latZ, lonZ, altZ, trkZ, spdZ float64
-	for _, p := range raw[i-span : i+span+1] {
-		latZ += p.Latitude
-		lonZ += p.Longitude
-		altZ += float64(p.Altitude)
-		trkZ += p.Track
-		spdZ += p.Speed
-	}
-	p := raw[i]
-	wn := float64(2*span + 1)
-	p.Latitude = latZ / wn
-	p.Longitude = lonZ / wn
-	p.Altitude = int(altZ / wn)
-	p.Track = trkZ / wn
-	p.Speed = spdZ / wn
-	return p
 }
 
 func (t *Flight) TrajectoryPoints(excludingTimeStamps []int64) []TrajectoryPointData {
