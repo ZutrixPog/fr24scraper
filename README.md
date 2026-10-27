@@ -4,12 +4,12 @@ A high-performance Go library for scraping real-time flight data from FlightRada
 
 ## Features
 
-- **Real-time Flight Data**: Stream live flight information from FlightRadar24
-- **Geographical Tiling**: Efficiently scrape large areas using configurable tile-based approach
+- **Real-time Flight Data**: Stream live flight information from FlightRadar24's gRPC-Web feed
+- **Single-request Coverage**: Fetch the whole bounding box in one request by default
 - **Event-driven Architecture**: Receive flight data through channels with proper event types
-- **Flight Trajectories**: Capture complete flight paths with timestamped coordinates
+- **Flight Trajectories**: Seed initial paths from the feed's position buffer, then extend them live
 - **Metadata Support**: Access aircraft details, flight numbers, origins, destinations, and more
-- **Concurrent Processing**: Multiple tiles processed simultaneously for optimal performance
+- **Anonymous Access**: Works without an FR24 account (up to 1500 flights per request)
 
 ## Installation
 
@@ -65,12 +65,12 @@ Customize the scraper behavior with `ScraperConfig`:
 
 ```go
 config := scraper.ScraperConfig{
-    Bounds:          [4]float64{40.27, 43.48, 24.95, 63.74}, // [topLeftLat, topLeftLon, bottomRightLat, bottomRightLon]
-    VerticalTiles:   4,    // Number of vertical divisions
-    HorizontalTiles: 4,    // Number of horizontal divisions
+    Bounds:          [4]float64{40.27, 43.48, 24.95, 63.74}, // [north, west, south, east]
+    VerticalTiles:   1,    // Keep at 1: the gRPC feed limit covers the box
+    HorizontalTiles: 1,    // Keep at 1: more tiles mean more requests
     UpdateInterval:    2 * time.Second, // How often to refresh data
-    FetchDetails:      false, // Enable detailed flight information (rate limited)
-    DetailsUpdateInterval: 30 * time.Second, // Start a details round at most once per interval
+    FetchDetails:      false, // Legacy clickhandler path; the live feed provides trails
+    DetailsUpdateInterval: 30 * time.Second,
 }
 
 scraper := scraper.NewScraper(config)
@@ -133,12 +133,30 @@ type TrajectoryPointData struct {
 }
 ```
 
+## How It Works
+
+The scraper POSTs a gRPC-Web `LiveFeed` request to
+`data-feed.flightradar24.com`. The request contains the bounding box, the
+visible data sources and services, a 1500-flight limit, and a field mask for
+`flight`, `reg`, `route`, `type`, and `icao_address`.
+
+Each response is decoded into the same `FlightData` shape the tracker already
+understands. The feed's `flightid` is the tracker's `Flight.ID` (an FR24 flight
+ID, not an ICAO address). The actual ICAO24 address comes from
+`extra_info.icao_address` and is exposed as `Flight.ICAO24`.
+
+Recent position deltas are converted into an initial trajectory. Only the
+oldest-to-newest position buffer is seeded once per flight; subsequent points
+come from the 2-second live updates. The old `clickhandler` details endpoint is
+no longer required and remains off by default.
+
 ## Performance Considerations
 
-- **Tile Configuration**: More tiles = more concurrent requests but higher memory usage
-- **Update Interval**: Shorter intervals provide fresher data but increase API load
-- **Detail Fetching**: Fetching details is limited and might not work as expected
-- **Event Buffer Size**: Default 100 events; increase if experiencing dropped events
+- **Tile Configuration**: Default is 1x1, which makes one request per update. More tiles multiply request volume.
+- **Update Interval**: Shorter intervals provide fresher data but increase API load; 2 seconds matches the feed's normal cadence.
+- **Detail Fetching**: The legacy clickhandler endpoint is Cloudflare-blocked for many clients; the live feed supplies position history instead.
+- **Event Buffer Size**: Default 100 events; increase if experiencing dropped events.
+- **Anonymous Limits**: Unauthenticated requests return at most 1500 flights and a reduced metadata set.
 
 ---
 

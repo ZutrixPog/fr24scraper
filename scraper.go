@@ -72,8 +72,8 @@ func DefaultConfig() ScraperConfig {
 	return ScraperConfig{
 		// Bounds:          [4]float64{43, 38, 22, 70}, // Iran by default
 		Bounds:                   [4]float64{40.277757, 43.480446, 24.954477, 63.746484},
-		VerticalTiles:            4,
-		HorizontalTiles:          4,
+		VerticalTiles:            1,
+		HorizontalTiles:          1,
 		UpdateInterval:           2 * time.Second,
 		FetchDetails:             false,
 		DetailsUpdateInterval:    30 * time.Second,

@@ -197,6 +197,39 @@ func (t *Tracker) addNewFlight(flightData *ReceivedFlightData) error {
 	return nil
 }
 
+func (t *Tracker) addFlightTrail(id uint64, trail []TrajectoryPointData) error {
+	if id == 0 {
+		return errors.New("flight ID is not valid")
+	}
+	if len(trail) == 0 {
+		return nil
+	}
+
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+
+	flight, exists := t.flights[id]
+	if !exists {
+		return fmt.Errorf("flight with ID %d does not exist", id)
+	}
+	if flight.InitialTrajectoryReceived {
+		return nil
+	}
+
+	for _, point := range trail {
+		flight.SetCoordinate(point.TimeStamp, point.Latitude, point.Longitude, point.Altitude, point.Track, point.Speed, t.trajLimit)
+	}
+
+	flight.InitialTrajectoryReceived = true
+	flight.ForceSendInfo = true
+
+	for _, obs := range t.observers {
+		obs.OnFlightUpdated(flight)
+	}
+
+	return nil
+}
+
 func (t *Tracker) addFlightDetail(id uint64, detail []map[string]any, countryID int) error {
 	if id == 0 {
 		return errors.New("flight ID is not valid")
@@ -263,6 +296,10 @@ func (t *Tracker) addFlightList(flightData *FlightData) error {
 		if err := t.addOrUpdateFlight(flightData); err != nil {
 			errorsList = append(errorsList, fmt.Errorf("failed to add/update flight %s: %w", flightID, err))
 		}
+	}
+
+	for id, trail := range flightData.Trails {
+		_ = t.addFlightTrail(id, trail)
 	}
 
 	if len(errorsList) > 0 {

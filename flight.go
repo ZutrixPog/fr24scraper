@@ -171,9 +171,10 @@ func (ti *FlightInfo) IsValid() bool {
 }
 
 type FlightData struct {
-	FullCount int            `json:"full_count"`
-	Version   int            `json:"version"`
-	Flights   map[string]any `json:"-"`
+	FullCount int                              `json:"full_count"`
+	Version   int                              `json:"version"`
+	Flights   map[string]any                   `json:"-"`
+	Trails    map[uint64][]TrajectoryPointData `json:"-"`
 }
 
 func (fd *FlightData) UnmarshalJSON(data []byte) error {
@@ -374,6 +375,8 @@ func toUint64(value any) uint64 {
 		return uint64(v)
 	case int64:
 		return uint64(v)
+	case uint64:
+		return v
 	case float32:
 		return uint64(v)
 	default:

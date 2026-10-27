@@ -20,46 +20,12 @@ var HTTPClient = &http.Client{
 		MaxConnsPerHost:     100,
 		MaxIdleConnsPerHost: 100,
 		IdleConnTimeout:     90 * time.Second,
+		ForceAttemptHTTP2:   true,
 	},
 }
 
 func DownloadFlightData(tile Tile) (*FlightData, error) {
-	url := fmt.Sprintf("http://data-cloud.flightradar24.com/zones/fcgi/feed.js?bounds=%.6f,%.6f,%.6f,%.6f&satellite=1&mlat=1&flarm=1&adsb=1&gnd=1&air=1&gliders=0&vehicles=0&estimated=0&maxage=0&stats=1",
-		tile.TopLeftLat, tile.BottomRightLat, tile.TopLeftLon, tile.BottomRightLon)
-
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// mimic browser request
-	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-	req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
-	req.Header.Set("Referer", "https://www.flightradar24.com/")
-	req.Header.Set("X-Requested-With", "XMLHttpRequest")
-
-	resp, err := HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to download flight data: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	var flightData FlightData
-	if err := json.Unmarshal(body, &flightData); err != nil {
-		return nil, fmt.Errorf("failed to parse flight data JSON: %w", err)
-	}
-
-	return &flightData, nil
+	return downloadLiveFeed(tile)
 }
 
 func ConvertFlightArrayToFlightData(flightID string, array []any) (*ReceivedFlightData, error) {
